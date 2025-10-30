@@ -1,60 +1,44 @@
-on: [push, pull_request, workflow_dispatch]
-
 name: Build
+on: [push, pull_request, workflow_dispatch]
 
 jobs:
   build:
     runs-on: ubuntu-latest
     container:
       image: zmkfirmware/zmk-build-arm:2.5
-    name: Build
     steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-      - name: Cache west modules
-        uses: actions/cache@v2
-        env:
-          cache-name: cache-zephyr-modules
+      - uses: actions/checkout@v4
+
+      - name: West init/update (use this repo as the manifest)
+        run: |
+          west init -l config
+          west update
+
+      - name: Build LEFT
+        run: |
+          west build -s zmk/app -d build/left -b corneish_zen_v2_left -- \
+            -DZMK_CONFIG=${{ github.workspace }}/config
+          cp build/left/zephyr/zmk.uf2 corneish_zen_v2_left.uf2
+
+      - name: Build RIGHT
+        run: |
+          west build -s zmk/app -d build/right -b corneish_zen_v2_right -- \
+            -DZMK_CONFIG=${{ github.workspace }}/config
+          cp build/right/zephyr/zmk.uf2 corneish_zen_v2_right.uf2
+
+      - name: Build settings_reset
+        run: |
+          west build -s zmk/app -d build/reset -b nice_nano_v2 -- \
+            -DZMK_CONFIG=${{ github.workspace }}/config -DSHIELD=settings_reset
+          cp build/reset/zephyr/zmk.uf2 settings_reset_nice_nano_v2.uf2
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
         with:
+          name: firmware
           path: |
-            modules/
-            tools/
-            zephyr/
-            bootloader/
-            zmk/
-          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('manifest-dir/west.yml') }}
-          restore-keys: |
-            ${{ runner.os }}-build-${{ env.cache-name }}-
-            ${{ runner.os }}-build-
-            ${{ runner.os }}-
-      - name: West Init
-        run: west init -l config
-      - name: West Update
-        run: west update
-      - name: West Zephyr export
-        run: west zephyr-export
-      - name: West Build (Corne-ish Zen Left)
-        run: west build -s zmk/app -b corne-ish_zen_left -- -DZMK_CONFIG="${GITHUB_WORKSPACE}/config"
-      - name: Corne-ish Zen DTS File
-        if: ${{ always() }}
-        run: cat -n build/zephyr/corne-ish_zen_left.dts.pre.tmp
-      - name: Corne-ish Zen Left Kconfig file
-        run: cat build/zephyr/.config | grep -v "^#" | grep -v "^$"
-      - name: Rename zmk.uf2
-        run: cp build/zephyr/zmk.uf2 corneish_zen_left.uf2
-      - name: Archive (Corne-ish Zen Left)
-        uses: actions/upload-artifact@v2
-        with:
-          name: firmware
-          path: corneish_zen_left.uf2
-      - name: West Build (Corne-ish Zen Right)
-        run: west build --pristine -s zmk/app -b corne-ish_zen_right -- -DZMK_CONFIG="${GITHUB_WORKSPACE}/config"
-      - name: Corne-ish Zen Right Kconfig file
-        run: cat build/zephyr/.config | grep -v "^#" | grep -v "^$"
-      - name: Rename zmk.uf2
-        run: cp build/zephyr/zmk.uf2 corneish_zen_right.uf2
-      - name: Archive (Corne-ish Zen Right)
-        uses: actions/upload-artifact@v2
-        with:
-          name: firmware
-          path: corneish_zen_right.uf2
+            corneish_zen_v2_left.uf2
+            corneish_zen_v2_right.uf2
+            settings_reset_nice_nano_v2.uf2
+          if-no-files-found: error
+          retention-days: 7
